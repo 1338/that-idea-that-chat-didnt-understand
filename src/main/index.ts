@@ -8,6 +8,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRunRequest } from '../shared/schema';
+import { loadConfig, saveConfig, migrateFromDotEnv, type AppConfig } from './config';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const activeRuns = new Map<string, ChildProcessWithoutNullStreams>();
@@ -45,7 +46,14 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // migrate any existing .env values into the app store before creating the window
+  try {
+    await migrateFromDotEnv();
+  } catch {
+    // ignore migration errors
+  }
+
   createWindow();
 
   app.on('activate', () => {
@@ -61,19 +69,20 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
   const composeRequest = normalizeComposeRequest(request);
   const fallback = createFallbackUi(composeRequest.prompt);
   const localEnv = readLocalEnv();
-  const openaiApiKey = localEnv.OPENAI_API_KEY?.trim();
+  const cfg = loadConfig();
+  const openaiApiKey = (cfg.apiKey ?? localEnv.OPENAI_API_KEY)?.trim();
 
   if (!openaiApiKey) {
     return {
       ...fallback,
-      aiNote: 'OPENAI_API_KEY is not set in .env, so this came from the local fallback composer.'
+      aiNote: 'OPENAI_API_KEY is not set in settings or .env, so this came from the local fallback composer.'
     };
   }
 
   try {
     const openai = createOpenAI({ apiKey: openaiApiKey });
 
-    const modelName = localEnv.OPENAI_MODEL?.trim() || defaultUiModel;
+    const modelName = (cfg.model ?? localEnv.OPENAI_MODEL ?? defaultUiModel).trim();
     const result = await generateObject({
       model: openai(modelName),
       schema: generatedUiSchema,
@@ -945,3 +954,10 @@ function parseDotEnv(contents: string): Record<string, string> {
 
   return values;
 }
+
+// Config IPC
+ipcMain.handle('config:get', () => loadConfig());
+ipcMain.handle('config:set', (_event, partial: Partial<AppConfig>) => {
+  saveConfig(partial);
+  return loadConfig();
+});

@@ -8,6 +8,8 @@ const api = {
   runAction: (request: ToolRunRequest): Promise<{ runId: string; command: string }> =>
     ipcRenderer.invoke("tool:run", request),
   cancelRun: (runId: string): Promise<boolean> => ipcRenderer.invoke("tool:cancel", runId),
+  getConfig: (): Promise<Record<string, any>> => ipcRenderer.invoke('config:get'),
+  setConfig: (cfg: Record<string, any>): Promise<Record<string, any>> => ipcRenderer.invoke('config:set', cfg),
   onToolOutput: (callback: (event: ToolOutputEvent) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: ToolOutputEvent) => callback(payload);
     ipcRenderer.on("tool:output", listener);
